@@ -28,7 +28,7 @@ def extract_ids_from_sheet(df):
                     found_ids.add(val.upper()) # 轉大寫防呆
     return list(found_ids)
 
-uploaded_file = st.file_uploader("📂 上傳退火明細表 (Excel)", type=['xlsx, 'xlsm'])
+uploaded_file = st.file_uploader("📂 上傳退火明細表 (Excel)", type=['xlsx', 'xlsm'])
 
 if uploaded_file and st.button("🚀 執行增量同步", type="primary"):
     with st.status("執行中...", expanded=True) as status:
