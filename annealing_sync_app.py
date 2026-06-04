@@ -9,7 +9,9 @@ st.title("🔥 退火紀錄增量同步工具")
 @st.cache_resource
 def get_db():
     if not firebase_admin._apps:
-        cred = credentials.Certificate(dict(st.secrets["gcp_service_account"]))
+        # 這樣寫，無論你的 key 叫 firebase_service_account 還是 gcp_service_account 都抓得到
+        creds_dict = dict(st.secrets.get("firebase_service_account", st.secrets.get("gcp_service_account")))
+        cred = credentials.Certificate(creds_dict)
         firebase_admin.initialize_app(cred)
     return firestore.client()
 
