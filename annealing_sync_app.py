@@ -23,9 +23,17 @@ def extract_ids_from_sheet(df):
     for rs, re, c in zones:
         for r in range(rs, re):
             if r < len(df) and c < len(df.columns):
-                val = str(df.iat[r, c]).strip()
-                if val and val.lower() not in ['nan', 'none', '']:
-                    found_ids.add(val.upper()) # 轉大寫防呆
+                val = str(df.iat[r, c]).strip().upper() # 一律轉大寫
+                
+                # 1. 排除空值與常見的無效字眼 (包含 N/A)
+                if val and val not in ['NAN', 'NONE', '', 'N/A', 'NA', '-']:
+                    
+                    # 2. 🔥 終極防呆：把斜線替換成底線，絕對禁止斜線進入 Firebase ID
+                    safe_rid = val.replace("/", "_").replace("\\", "_")
+                    
+                    if safe_rid:
+                        found_ids.add(safe_rid)
+                        
     return list(found_ids)
 
 uploaded_file = st.file_uploader("📂 上傳退火明細表 (Excel)", type=['xlsx', 'xlsm'])
