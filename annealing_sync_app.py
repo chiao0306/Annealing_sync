@@ -4,7 +4,10 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 st.set_page_config(page_title="退火紀錄表同步", page_icon="🔥")
-st.title("🔥 退火紀錄增量同步工具")
+
+st.markdown("### 🔥 退火紀錄增量同步工具")
+# 或是使用 markdown 指定 H3 標題層級：
+# 或是使用st.subheader("🔥 退火紀錄增量同步工具")
 
 @st.cache_resource
 def get_db():
@@ -114,7 +117,11 @@ if uploaded_file:
         st.success("🎉 檔案解析完畢，目前沒有需要新增的分頁資料 (皆已同步過)。")
         
 st.divider()
-st.header("🔍 驗證與查詢：反查退火紀錄")
+st.markdown("#### 🔍 驗證與查詢：反查退火紀錄")
+
+# 如果覺得還是太大，可以直接用純粗體字：
+# st.write("**🔍 驗證與查詢：反查退火紀錄**")
+
 st.write("輸入退火編號，即可快速確認該編號被記錄在哪些分頁中。")
 
 # 建立兩欄排版，讓畫面緊湊一點
