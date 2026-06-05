@@ -112,3 +112,38 @@ if uploaded_file:
                 status.update(label=f"✅ 完成！最新進度更新至 {max_sheet_processed} 頁", state="complete")
     else:
         st.success("🎉 檔案解析完畢，目前沒有需要新增的分頁資料 (皆已同步過)。")
+        
+st.divider()
+st.header("🔍 驗證與查詢：反查退火紀錄")
+st.write("輸入退火編號，即可快速確認該編號被記錄在哪些分頁中。")
+
+# 建立兩欄排版，讓畫面緊湊一點
+col1, col2 = st.columns([3, 1])
+with col1:
+    search_id = st.text_input("輸入退火編號 (例如：A123_45)：", placeholder="請輸入編號...").strip().upper()
+
+if search_id:
+    # 保持與寫入時完全相同的防呆替換邏輯
+    safe_search_id = search_id.replace("/", "_").replace("\\", "_")
+    
+    with st.spinner("查詢 Firebase 中..."):
+        # 直接拿這個 ID 去對應的 collection 抓文件
+        doc_ref = db.collection("roll_annealing_index").document(safe_search_id)
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            data = doc.to_dict()
+            sheets_array = data.get("sheets", [])
+            # 將分頁數字由小到大排序，閱讀起來更直覺
+            sheets_array.sort()
+            
+            st.success(f"✅ 找到了！編號 **{safe_search_id}** 存在於資料庫中。")
+            st.info(f"📌 出現分頁： **{', '.join(map(str, sheets_array))}**")
+        else:
+            st.warning(f"⚠️ 在 Firebase 中找不到編號 **{safe_search_id}** 的紀錄。")
+            st.markdown("""
+            *可能原因：*
+            * 該編號尚未被上傳同步。
+            * 輸入時有錯字或漏字。
+            * 在原本的 Excel 中，該欄位為空值或被判定為無效字眼。
+            """)
