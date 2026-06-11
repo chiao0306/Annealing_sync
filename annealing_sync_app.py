@@ -41,9 +41,11 @@ def extract_ids_from_sheet(df):
 # ==========================================
 uploaded_file = st.file_uploader("📂 上傳退火明細表 (Excel)", type=['xlsx', 'xlsm'])
 
+# 直接顯示在檔案上傳區塊的下方，無論有沒有上傳檔案都看得到
+st.info(f"📌 目前系統最新進度 (last_sheet)：**{last_sheet_num}**")
+
 if uploaded_file:
-    st.info("資料解析中，請先確認下方預覽內容...")
-    st.write(f"📌 上次同步至分頁：{last_sheet_num}，系統將只處理大於此數字的新分頁。")
+    st.write("資料解析中，請先確認下方預覽內容...")
     
     df_dict = pd.read_excel(uploaded_file, sheet_name=None, header=None, dtype=str)
     
@@ -55,6 +57,7 @@ if uploaded_file:
         if not str(sheet_name).strip().isdigit(): continue
         
         sheet_int = int(str(sheet_name).strip())
+        # 系統依然會用全域的 last_sheet_num 來做防呆判斷
         if sheet_int <= last_sheet_num: continue
         
         extracted_ids = extract_ids_from_sheet(df)
@@ -97,7 +100,7 @@ if uploaded_file:
                     
                 meta_ref.set({"last_sheet": max_sheet_processed}, merge=True)
                 status.update(label=f"✅ 完成！最新進度更新至 {max_sheet_processed} 頁", state="complete")
-                st.rerun() # 寫入成功後自動重整畫面以更新進度
+                st.rerun() 
     else:
         st.success("🎉 檔案解析完畢，目前沒有需要新增的分頁資料 (皆已同步過)。")
 
