@@ -134,82 +134,72 @@ st.divider()
 st.markdown("#### 🛠️ 系統維護：還原 / 刪除特定分頁資料")
 
 with st.expander("展開執行還原作業"):
-    st.warning("⚠️ **危險操作**：將從資料庫中抽除指定分頁。若某編號被抽除後無其他紀錄，會被徹底刪除。")
+    st.warning("⚠️ **危險操作**：將從資料庫中抽除指定分頁，並自動將進度退回至刪除區間的前一頁。")
     
-    col_r1, col_r2 = st.columns(2)
-    with col_r1:
-        rollback_range = st.text_input("刪除分頁區間 (例如 2116-2116 或 2115-2117)：", placeholder="開始-結束")
-    with col_r2:
-        # 預設把重置進度設定為目前系統進度，並允許手動修改
-        target_last_sheet = st.number_input("還原後的最後分頁進度 (last_sheet)：", min_value=0, value=last_sheet_num, step=1)
-        
-    # 這裡改成密碼輸入框，type="password" 讓畫面只顯示星星/點點
+    rollback_range = st.text_input("刪除分頁區間 (例如 2100-2116，單頁請填 2116-2116)：", placeholder="開始-結束")
     admin_password = st.text_input("請輸入管理員密碼以解鎖：", type="password")
     
-    # 從 st.secrets 取得設定好的密碼 (預設值設為 None 防呆)
     correct_password = st.secrets.get("admin_password", None)
-    
-    # 檢查密碼是否正確，以及有沒有填寫區間
-    # 如果 secrets 沒設定密碼，或者輸入錯誤，按鈕就會鎖死
     btn_disabled = (not correct_password) or (admin_password != correct_password) or (not rollback_range)
     
     if st.button("🚨 執行還原", disabled=btn_disabled, type="primary"):
         try:
-            start_str, end_str = rollback_range.split("-")
-            start_sheet = int(start_str.strip())
-            end_sheet = int(end_str.strip())
+            val1, val2 = rollback_range.split("-")
             
-            if start_sheet > end_sheet:
-                st.error("❌ 錯誤：開始分頁不能大於結束分頁！")
-            else:
-                bad_sheets = list(range(start_sheet, end_sheet + 1))
+            # 自動排序大小，解決大小數字放前後的問題
+            start_sheet = min(int(val1.strip()), int(val2.strip()))
+            end_sheet = max(int(val1.strip()), int(val2.strip()))
+            
+            # 自動計算正確的還原點 (最小值減 1)，如果低於 0 則設為 0
+            target_last_sheet = max(0, start_sheet - 1)
+            
+            bad_sheets = list(range(start_sheet, end_sheet + 1))
+            
+            with st.status(f"準備移除分頁 {start_sheet} 到 {end_sheet}，並退回至 {target_last_sheet}...", expanded=True) as status:
+                docs = db.collection("roll_annealing_index").stream()
                 
-                with st.status(f"準備從所有紀錄中移除分頁 {bad_sheets}...", expanded=True) as status:
-                    # 取得所有退火紀錄
-                    docs = db.collection("roll_annealing_index").stream()
-                    
-                    batch = db.batch()
-                    updates_count = 0
-                    deleted_count = 0
-                    modified_count = 0
+                batch = db.batch()
+                updates_count = 0
+                deleted_count = 0
+                modified_count = 0
 
-                    st.write("掃描資料庫比對中，這可能需要一點時間...")
+                st.write("掃描資料庫比對中，這可能需要一點時間...")
+                
+                for doc in docs:
+                    data = doc.to_dict()
+                    current_sheets = data.get("sheets", [])
                     
-                    for doc in docs:
-                        data = doc.to_dict()
-                        current_sheets = data.get("sheets", [])
+                    if any(sheet in current_sheets for sheet in bad_sheets):
+                        new_sheets = [s for s in current_sheets if s not in bad_sheets]
                         
-                        # 檢查這份文件是否包含我們要移除的「問題分頁」
-                        if any(sheet in current_sheets for sheet in bad_sheets):
-                            new_sheets = [s for s in current_sheets if s not in bad_sheets]
+                        if not new_sheets:
+                            batch.delete(doc.reference)
+                            deleted_count += 1
+                        else:
+                            batch.update(doc.reference, {"sheets": firestore.ArrayRemove(bad_sheets)})
+                            modified_count += 1
                             
-                            if not new_sheets:
-                                batch.delete(doc.reference)
-                                deleted_count += 1
-                            else:
-                                batch.update(doc.reference, {"sheets": firestore.ArrayRemove(bad_sheets)})
-                                modified_count += 1
-                                
-                            updates_count += 1
-                            
-                            if updates_count >= 400:
-                                batch.commit()
-                                batch = db.batch()
-                                updates_count = 0
+                        updates_count += 1
+                        
+                        if updates_count >= 400:
+                            batch.commit()
+                            batch = db.batch()
+                            updates_count = 0
 
-                    if updates_count > 0:
-                        batch.commit()
-                        
-                    # 覆寫系統 Meta 狀態 (退回進度)
-                    meta_ref.set({"last_sheet": target_last_sheet}, merge=True)
+                if updates_count > 0:
+                    batch.commit()
                     
-                    status.update(label=f"✅ 還原執行完畢！進度已重置為 {target_last_sheet}", state="complete")
-                    
-                    st.success(f"🗑️ 徹底刪除的空文件數 : {deleted_count} 筆")
-                    st.success(f"📝 成功修改的分頁陣列數 : {modified_count} 筆")
-                    
-                    st.balloons()
-                    
+                # 寫入系統自動計算好的退回進度
+                meta_ref.set({"last_sheet": target_last_sheet}, merge=True)
+                
+                status.update(label=f"✅ 還原執行完畢！進度已安全重置為 {target_last_sheet}", state="complete")
+                
+                st.success(f"🗑️ 徹底刪除的空文件數 : {deleted_count} 筆")
+                st.success(f"📝 成功修改的分頁陣列數 : {modified_count} 筆")
+                st.info(f"📌 系統下次將從分頁 {target_last_sheet + 1} 開始重新匯入。")
+                
+                st.balloons()
+                
         except ValueError:
             st.error("❌ 格式錯誤：請確保輸入格式為 '數字-數字'，例如 2116-2116。")
         except Exception as e:
