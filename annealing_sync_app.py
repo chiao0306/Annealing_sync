@@ -133,79 +133,97 @@ if search_id:
 # ==========================================
 # 系統維護：還原與刪除區塊
 # ==========================================
-st.divider()
-st.markdown("#### 🛠️ 系統維護：還原 / 刪除特定分頁資料")
 
-with st.expander("展開執行還原作業"):
-    st.warning("⚠️ **危險操作**：將從資料庫中抽除指定分頁，並自動將進度退回至刪除區間的前一頁。")
+# 1. 先定義確認彈出視窗的 UI 與執行邏輯
+@st.dialog("⚠️ 刪除最終確認")
+def confirm_deletion_dialog(start_sheet, end_sheet, target_last_sheet, bad_sheets):
+    st.error(f"即將從所有紀錄中移除分頁：**{start_sheet} 到 {end_sheet}**")
+    st.warning(f"系統進度將自動退回至：**{target_last_sheet}**")
+    st.markdown("🚨 **注意：** 刪除後若該退火編號無其他分頁紀錄，將被徹底移除。此操作無法復原！")
     
-    # 單純顯示目前的進度供參考，不提供修改
+    if st.button("🔴 我已確認，執行刪除作業", type="primary", use_container_width=True):
+        with st.spinner("掃描資料庫比對與刪除中，這可能需要一點時間..."):
+            docs = db.collection("roll_annealing_index").stream()
+            
+            batch = db.batch()
+            updates_count = 0
+            deleted_count = 0
+            modified_count = 0
+            
+            for doc in docs:
+                data = doc.to_dict()
+                current_sheets = data.get("sheets", [])
+                
+                if any(sheet in current_sheets for sheet in bad_sheets):
+                    new_sheets = [s for s in current_sheets if s not in bad_sheets]
+                    
+                    if not new_sheets:
+                        batch.delete(doc.reference)
+                        deleted_count += 1
+                    else:
+                        batch.update(doc.reference, {"sheets": firestore.ArrayRemove(bad_sheets)})
+                        modified_count += 1
+                        
+                    updates_count += 1
+                    
+                    if updates_count >= 400:
+                        batch.commit()
+                        batch = db.batch()
+                        updates_count = 0
+
+            if updates_count > 0:
+                batch.commit()
+                
+            # 寫入系統自動計算好的退回進度
+            meta_ref = db.collection("system_meta").document("annealing_sync")
+            meta_ref.set({"last_sheet": target_last_sheet}, merge=True)
+            
+        # 執行成功後，將結果存入 session_state 以便重整後顯示，然後重整畫面
+        st.session_state['delete_msg'] = f"✅ 成功刪除 {deleted_count} 筆空文件，修改 {modified_count} 筆陣列。進度已退回 {target_last_sheet}。"
+        st.rerun()
+
+# 2. 實際的頁面介面
+st.divider()
+st.markdown("#### 🛠️ 系統維護：刪除特定分頁資料")
+
+# 檢查剛剛是否剛執行完刪除，顯示成功訊息
+if 'delete_msg' in st.session_state:
+    st.success(st.session_state['delete_msg'])
+    st.balloons()
+    del st.session_state['delete_msg'] # 顯示過就清除
+
+with st.expander("展開執行刪除作業"):
+    st.warning("⚠️ **危險操作**：將從資料庫中抽除指定分頁，並自動將進度退回至刪除區間的前一頁。")
     st.info(f"📌 目前系統最新進度 (last_sheet)：**{last_sheet_num}**")
     
     rollback_range = st.text_input("刪除分頁區間 (例如 2100-2116，單頁請填 2116-2116)：", placeholder="開始-結束")
     admin_password = st.text_input("請輸入管理員密碼以解鎖：", type="password")
     
+    # --- 密碼狀態檢查與防呆提示 ---
     correct_password = st.secrets.get("admin_password", None)
+    
+    if correct_password is None:
+        st.error("❌ 系統錯誤：無法讀取密碼！請確認已在 `.streamlit/secrets.toml` 或 Streamlit 雲端後台設定好 `admin_password`。")
+    elif admin_password and admin_password != correct_password:
+        st.error("❌ 密碼錯誤")
+    elif admin_password == correct_password:
+        st.success("✅ 密碼正確，按鈕已解鎖")
+        
     btn_disabled = (not correct_password) or (admin_password != correct_password) or (not rollback_range)
     
-    if st.button("🚨 執行還原", disabled=btn_disabled, type="primary"):
+    # 3. 觸發彈出視窗的按鈕
+    if st.button("🚨 執行刪除", disabled=btn_disabled, type="primary"):
         try:
             val1, val2 = rollback_range.split("-")
             
-            # 自動排序大小，解決大小數字放前後的問題
             start_sheet = min(int(val1.strip()), int(val2.strip()))
             end_sheet = max(int(val1.strip()), int(val2.strip()))
-            
-            # 自動計算正確的還原點 (最小值減 1)，如果低於 0 則設為 0
             target_last_sheet = max(0, start_sheet - 1)
-            
             bad_sheets = list(range(start_sheet, end_sheet + 1))
             
-            with st.status(f"準備移除分頁 {start_sheet} 到 {end_sheet}，並退回至 {target_last_sheet}...", expanded=True) as status:
-                docs = db.collection("roll_annealing_index").stream()
-                
-                batch = db.batch()
-                updates_count = 0
-                deleted_count = 0
-                modified_count = 0
-
-                st.write("掃描資料庫比對中，這可能需要一點時間...")
-                
-                for doc in docs:
-                    data = doc.to_dict()
-                    current_sheets = data.get("sheets", [])
-                    
-                    if any(sheet in current_sheets for sheet in bad_sheets):
-                        new_sheets = [s for s in current_sheets if s not in bad_sheets]
-                        
-                        if not new_sheets:
-                            batch.delete(doc.reference)
-                            deleted_count += 1
-                        else:
-                            batch.update(doc.reference, {"sheets": firestore.ArrayRemove(bad_sheets)})
-                            modified_count += 1
-                            
-                        updates_count += 1
-                        
-                        if updates_count >= 400:
-                            batch.commit()
-                            batch = db.batch()
-                            updates_count = 0
-
-                if updates_count > 0:
-                    batch.commit()
-                    
-                # 寫入系統自動計算好的退回進度
-                meta_ref.set({"last_sheet": target_last_sheet}, merge=True)
-                
-                status.update(label=f"✅ 還原執行完畢！進度已安全重置為 {target_last_sheet}", state="complete")
-                
-                st.success(f"🗑️ 徹底刪除的空文件數 : {deleted_count} 筆")
-                st.success(f"📝 成功修改的分頁陣列數 : {modified_count} 筆")
-                st.info(f"📌 系統下次將從分頁 {target_last_sheet + 1} 開始重新匯入。")
-                
-                st.balloons()
-                
+            # 呼叫上面定義的 dialog 視窗
+            confirm_deletion_dialog(start_sheet, end_sheet, target_last_sheet, bad_sheets)
+            
         except ValueError:
             st.error("❌ 格式錯誤：請確保輸入格式為 '數字-數字'，例如 2116-2116。")
         except Exception as e:
