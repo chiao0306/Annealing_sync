@@ -136,6 +136,9 @@ st.markdown("#### 🛠️ 系統維護：還原 / 刪除特定分頁資料")
 with st.expander("展開執行還原作業"):
     st.warning("⚠️ **危險操作**：將從資料庫中抽除指定分頁，並自動將進度退回至刪除區間的前一頁。")
     
+    # 單純顯示目前的進度供參考，不提供修改
+    st.info(f"📌 目前系統最新進度 (last_sheet)：**{last_sheet_num}**")
+    
     rollback_range = st.text_input("刪除分頁區間 (例如 2100-2116，單頁請填 2116-2116)：", placeholder="開始-結束")
     admin_password = st.text_input("請輸入管理員密碼以解鎖：", type="password")
     
