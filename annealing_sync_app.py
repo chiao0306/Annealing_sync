@@ -134,8 +134,7 @@ if search_id:
 # 系統維護：還原與刪除區塊
 # ==========================================
 
-# 1. 定義確認彈出視窗的 UI 與執行邏輯 (支援區間與指定單頁)
-@st.dialog("⚠️ 刪除最終確認")
+# 1. 定義確認彈出視窗的 UI 與執行邏輯 (支援區間與指定單頁)@st.dialog("⚠️ 刪除最終確認")
 def confirm_deletion_dialog(bad_sheets, target_last_sheet=None):
     if target_last_sheet is not None:
         st.error(f"即將從所有紀錄中移除分頁區間：**{min(bad_sheets)} 到 {max(bad_sheets)}**")
@@ -147,20 +146,33 @@ def confirm_deletion_dialog(bad_sheets, target_last_sheet=None):
     st.markdown("🚨 **注意：** 刪除後若該退火編號無其他分頁紀錄，將被徹底移除。此操作無法復原！")
     
     if st.button("🔴 我已確認，執行刪除作業", type="primary", use_container_width=True):
-        with st.spinner("掃描資料庫比對與刪除中，這可能需要一點時間..."):
-            docs = db.collection("roll_annealing_index").stream()
+        with st.spinner("精準掃描資料庫比對與刪除中，這可能需要一點時間..."):
             
             batch = db.batch()
             updates_count = 0
             deleted_count = 0
             modified_count = 0
             
-            for doc in docs:
-                data = doc.to_dict()
-                current_sheets = data.get("sheets", [])
+            # 用來記錄已經處理過的 doc ID，避免同一筆紀錄因為跨 chunk 而被重複處理
+            processed_doc_ids = set()
+            
+            # Firebase array_contains_any 限制最多 10 個元素，所以將 bad_sheets 分批
+            for i in range(0, len(bad_sheets), 10):
+                chunk = bad_sheets[i:i+10]
                 
-                # 檢查該紀錄是否有包含準備要刪除的分頁
-                if any(sheet in current_sheets for sheet in bad_sheets):
+                # 🚀 優化核心：只抓出 sheets 陣列中包含這些特定分頁的紀錄，不再全表掃描
+                query = db.collection("roll_annealing_index").where("sheets", "array_contains_any", chunk)
+                docs = query.stream()
+                
+                for doc in docs:
+                    if doc.id in processed_doc_ids:
+                        continue # 已經處理過就跳過
+                    
+                    processed_doc_ids.add(doc.id)
+                    data = doc.to_dict()
+                    current_sheets = data.get("sheets", [])
+                    
+                    # 重新計算移除壞掉分頁後的新陣列
                     new_sheets = [s for s in current_sheets if s not in bad_sheets]
                     
                     if not new_sheets:
@@ -180,7 +192,7 @@ def confirm_deletion_dialog(bad_sheets, target_last_sheet=None):
             if updates_count > 0:
                 batch.commit()
                 
-            # 如果有指定 target_last_sheet，才寫入系統退回進度
+            # 寫入系統進度
             if target_last_sheet is not None:
                 meta_ref = db.collection("system_meta").document("annealing_sync")
                 meta_ref.set({"last_sheet": target_last_sheet}, merge=True)
@@ -188,7 +200,6 @@ def confirm_deletion_dialog(bad_sheets, target_last_sheet=None):
             else:
                 msg_suffix = "系統進度保持不變。"
             
-        # 執行成功後，將結果存入 session_state 以便重整後顯示
         st.session_state['delete_msg'] = f"✅ 成功刪除 {deleted_count} 筆空文件，修改 {modified_count} 筆陣列。{msg_suffix}"
         st.rerun()
 
